@@ -5,6 +5,23 @@
 
 ---
 
+## 다운로드 및 설치
+
+소스 코드를 직접 빌드할 필요 없이 [GitHub Releases](https://github.com/K-im-jinwoo/toki/releases/latest)에서 OS에 맞는 설치 파일을 바로 내려받을 수 있습니다.
+
+- **macOS (Apple Silicon M1–M4):** `Toki_*_aarch64.dmg`
+- **macOS (Intel):** `Toki_*_x64.dmg`
+- **Windows:** `Toki_*_x64-setup.exe` 또는 `.msi`
+- **Linux:** `Toki_*.AppImage` 또는 `.deb`
+
+> **macOS 처음 실행 시 보안 경고가 뜰 경우**  
+> Apple Developer 공증 없이 배포되는 오픈소스 빌드이므로, 응용 프로그램 폴더에 옮긴 뒤 처음 한 번만 아래 명령을 실행하거나 `시스템 설정 → 개인정보 보호 및 보안 → 그래도 열기`를 눌러 주세요.
+> ```bash
+> xattr -cr /Applications/Toki.app
+> ```
+
+---
+
 ## 주요 기능
 
 - **메뉴바 / 시스템 트레이 실루엣 애니메이션 (아이콘 전용)**

@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish-tauri:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: '--target aarch64-apple-darwin'
+          - platform: macos-latest
+            args: '--target x86_64-apple-darwin'
+          - platform: ubuntu-22.04
+            args: ''
+          - platform: windows-latest
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            patchelf \
+            xdg-utils
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run Rust unit tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build and publish Tauri release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: 'Toki v__VERSION__'
+          releaseBody: |
+            ## Toki v__VERSION__
+
+            OS에 맞는 설치 파일을 다운로드하세요.
+            - **macOS (Apple Silicon M1–M4):** `*_aarch64.dmg`
+            - **macOS (Intel):** `*_x64.dmg`
+            - **Windows:** `*_x64-setup.exe` 또는 `.msi`
+            - **Linux:** `*.AppImage` 또는 `.deb`
+
+            > **macOS 처음 실행 안내:** Apple 공증 없이 배포된 빌드이므로 처음 실행 시 보안 경고가 뜨면 `시스템 설정 → 개인정보 보호 및 보안 → 그래도 열기` 또는 터미널에서 `xattr -cr /Applications/Toki.app` 실행 후 열어주세요.
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
