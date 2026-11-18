@@ -1,0 +1,16 @@
+{
+  "updated_at": 1800000000,
+  "rate_limits": {
+    "five_hour": {
+      "used_percentage": 27.5,
+      "resets_at": 2000001000
+    },
+    "seven_day": {
+      "used_percentage": 61.0,
+      "resets_at": 2000500000
+    }
+  },
+  "workspace": {
+    "current_dir": "/Users/demo/Project/toki"
+  }
+}

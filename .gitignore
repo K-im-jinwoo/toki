@@ -1,0 +1,15 @@
+# Dependencies & frontend build
+node_modules/
+dist/
+dist-ssr/
+
+# Rust / Tauri build artifacts
+src-tauri/target/
+*.rs.bk
+
+# OS & editor files
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/

@@ -1,0 +1,68 @@
+@import "tailwindcss";
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Apple SD Gothic Neo", "Segoe UI", sans-serif;
+}
+
+@keyframes toki-bob {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes toki-hop {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  40% {
+    transform: translateY(-6px) rotate(-4deg);
+  }
+  70% {
+    transform: translateY(-2px) rotate(3deg);
+  }
+}
+
+@keyframes toki-sprint {
+  0%, 100% {
+    transform: translateX(0px) translateY(0px) skewX(-4deg);
+  }
+  50% {
+    transform: translateX(2px) translateY(-5px) skewX(-8deg);
+  }
+}
+
+@keyframes toki-alert {
+  0%, 100% {
+    transform: translateY(0px) scale(1);
+  }
+  30% {
+    transform: translateY(-6px) scale(1.04);
+  }
+  60% {
+    transform: translateY(0px) scale(0.98);
+  }
+}
+
+.animate-toki-bob {
+  animation: toki-bob 1.8s ease-in-out infinite;
+}
+
+.animate-toki-hop {
+  animation: toki-hop 0.55s ease-in-out infinite;
+}
+
+.animate-toki-sprint {
+  animation: toki-sprint 0.28s ease-in-out infinite;
+}
+
+.animate-toki-alert {
+  animation: toki-alert 0.7s ease-in-out infinite;
+}
