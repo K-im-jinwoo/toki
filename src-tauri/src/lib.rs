@@ -22,11 +22,32 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     window::{Effect, EffectState, EffectsBuilder},
     AppHandle, LogicalSize, Manager, PhysicalPosition, Position, Rect, Size, WebviewWindow,
-    WindowEvent,
 };
+#[cfg(not(target_os = "macos"))]
+use tauri::WindowEvent;
 use tauri_plugin_autostart::ManagerExt;
 
+#[cfg(target_os = "macos")]
+use tauri_nspanel::{
+    tauri_panel, CollectionBehavior, ManagerExt as PanelManagerExt, PanelLevel, StyleMask,
+    WebviewWindowExt,
+};
+
 const POPOVER_WIDTH: f64 = 368.0;
+
+#[cfg(target_os = "macos")]
+tauri_panel! {
+    panel!(TokiPanel {
+        config: {
+            can_become_key_window: true,
+            is_floating_panel: true
+        }
+    })
+
+    panel_event!(TokiPanelEventHandler {
+        window_did_resign_key(notification: &NSNotification) -> ()
+    })
+}
 
 struct AppState {
     animator: AnimatorHandle,
@@ -154,11 +175,7 @@ fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<bool, String> 
 }
 
 #[tauri::command]
-fn resize_popover(
-    app: AppHandle,
-    state: tauri::State<'_, AppState>,
-    height: f64,
-) {
+fn resize_popover(app: AppHandle, state: tauri::State<'_, AppState>, height: f64) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
@@ -177,6 +194,34 @@ fn quit_app(app: AppHandle, state: tauri::State<'_, AppState>) {
     app.exit(0);
 }
 
+#[cfg(target_os = "macos")]
+fn setup_macos_panel(app: &AppHandle, window: &WebviewWindow) {
+    if let Ok(panel) = window.to_panel::<TokiPanel>() {
+        panel.set_level(PanelLevel::Status.value());
+        panel.set_floating_panel(true);
+        panel.set_hides_on_deactivate(false);
+        panel.set_released_when_closed(false);
+        let _ = panel.add_style_mask(StyleMask::empty().nonactivating_panel().into());
+        panel.set_collection_behavior(
+            CollectionBehavior::new()
+                .can_join_all_spaces()
+                .full_screen_auxiliary()
+                .stationary()
+                .ignores_cycle()
+                .into(),
+        );
+
+        let handler = TokiPanelEventHandler::new();
+        let app_handle = app.clone();
+        handler.window_did_resign_key(move |_| {
+            if let Ok(p) = app_handle.get_webview_panel("main") {
+                p.hide();
+            }
+        });
+        panel.set_event_handler(Some(handler.as_ref()));
+    }
+}
+
 fn toggle_popover_near_tray(app: &AppHandle, tray_rect: Rect) {
     if let Some(state) = app.try_state::<AppState>() {
         if let Ok(mut guard) = state.last_tray_rect.lock() {
@@ -188,14 +233,42 @@ fn toggle_popover_near_tray(app: &AppHandle, tray_rect: Rect) {
         return;
     };
 
-    if window.is_visible().unwrap_or(false) {
-        let _ = window.hide();
+    #[cfg(target_os = "macos")]
+    if let Ok(panel) = app.get_webview_panel("main") {
+        if panel.is_visible() {
+            panel.hide();
+        } else {
+            position_window_near_rect(&window, tray_rect);
+            panel.show_and_make_key();
+        }
         return;
     }
 
-    position_window_near_rect(&window, tray_rect);
-    let _ = window.show();
-    let _ = window.set_focus();
+    #[cfg(not(target_os = "macos"))]
+    {
+        if window.is_visible().unwrap_or(false) {
+            let _ = window.hide();
+            return;
+        }
+        position_window_near_rect(&window, tray_rect);
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn find_monitor_for_rect(window: &WebviewWindow, x: f64, y: f64) -> Option<tauri::Monitor> {
+    if let Ok(monitors) = window.available_monitors() {
+        for m in monitors {
+            let p = m.position();
+            let s = m.size();
+            let in_x = x >= p.x as f64 && x <= (p.x + s.width as i32) as f64;
+            let in_y = y >= p.y as f64 && y <= (p.y + s.height as i32) as f64;
+            if in_x && in_y {
+                return Some(m);
+            }
+        }
+    }
+    window.current_monitor().ok().flatten()
 }
 
 fn position_window_near_rect(window: &WebviewWindow, tray_rect: Rect) {
@@ -210,7 +283,7 @@ fn position_window_near_rect(window: &WebviewWindow, tray_rect: Rect) {
     let mut target_x = rect_pos.x + (rect_size.width / 2.0) - (win_size.width as f64 / 2.0);
     let mut target_y = rect_pos.y + rect_size.height + (6.0 * scale);
 
-    if let Ok(Some(monitor)) = window.current_monitor() {
+    if let Some(monitor) = find_monitor_for_rect(window, rect_pos.x, rect_pos.y) {
         let mon_pos = monitor.position();
         let mon_size = monitor.size();
         let min_x = mon_pos.x as f64 + 8.0 * scale;
@@ -231,12 +304,17 @@ fn position_window_near_rect(window: &WebviewWindow, tray_rect: Rect) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![]),
         ))
-        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_notification::init());
+
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_nspanel::init());
+
+    builder
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -280,6 +358,7 @@ pub fn run() {
                             .radius(14.0)
                             .build(),
                     );
+                    setup_macos_panel(app.handle(), &window);
                 }
                 #[cfg(target_os = "windows")]
                 {
@@ -290,12 +369,15 @@ pub fn run() {
                     );
                 }
 
-                let win_clone = window.clone();
-                window.on_window_event(move |event| {
-                    if let WindowEvent::Focused(false) = event {
-                        let _ = win_clone.hide();
-                    }
-                });
+                #[cfg(not(target_os = "macos"))]
+                {
+                    let win_clone = window.clone();
+                    window.on_window_event(move |event| {
+                        if let WindowEvent::Focused(false) = event {
+                            let _ = win_clone.hide();
+                        }
+                    });
+                }
             }
 
             Ok(())

@@ -32,6 +32,7 @@ const MASCOT_LABELS: Record<MascotState, string> = {
 };
 
 export function App() {
+  const isDev = import.meta.env.DEV;
   const [snapshot, setSnapshot] = useState<UsageSnapshot | null>(null);
   const [mode, setMode] = useState<DataMode>('live');
   const [scenario, setScenario] = useState<MockScenario>('auto');
@@ -43,13 +44,15 @@ export function App() {
       .then(setSnapshot)
       .catch(() => {});
 
-    invoke<DataMode>('get_data_mode')
-      .then(setMode)
-      .catch(() => {});
+    if (isDev) {
+      invoke<DataMode>('get_data_mode')
+        .then(setMode)
+        .catch(() => {});
 
-    invoke<MockScenario>('get_mock_scenario')
-      .then(setScenario)
-      .catch(() => {});
+      invoke<MockScenario>('get_mock_scenario')
+        .then(setScenario)
+        .catch(() => {});
+    }
 
     const unlistenPromise = listen<UsageSnapshot>('usage-snapshot', (event) => {
       setSnapshot(event.payload);
@@ -58,7 +61,7 @@ export function App() {
     return () => {
       unlistenPromise.then((unlisten) => unlisten());
     };
-  }, []);
+  }, [isDev]);
 
   // Automatically resize popover window to fit visible cards & settings view
   useLayoutEffect(() => {
@@ -129,20 +132,22 @@ export function App() {
               <h1 className="text-sm font-bold tracking-tight text-slate-900 dark:text-white">
                 Toki
               </h1>
-              <button
-                type="button"
-                onClick={() =>
-                  handleModeToggle(mode === 'live' ? 'mock' : 'live')
-                }
-                className={`px-1.5 py-0.5 text-[10px] font-semibold rounded-full border cursor-pointer transition-colors ${
-                  mode === 'live'
-                    ? 'bg-emerald-500/15 text-emerald-700 border-emerald-500/25 dark:text-emerald-300'
-                    : 'bg-indigo-500/15 text-indigo-600 border-indigo-500/25 dark:text-indigo-300'
-                }`}
-                title="Live / Mock 모드 전환"
-              >
-                {mode === 'live' ? 'Live' : 'Mock'}
-              </button>
+              {isDev && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleModeToggle(mode === 'live' ? 'mock' : 'live')
+                  }
+                  className={`px-1.5 py-0.5 text-[10px] font-semibold rounded-full border cursor-pointer transition-colors ${
+                    mode === 'live'
+                      ? 'bg-emerald-500/15 text-emerald-700 border-emerald-500/25 dark:text-emerald-300'
+                      : 'bg-indigo-500/15 text-indigo-600 border-indigo-500/25 dark:text-indigo-300'
+                  }`}
+                  title="Live / Mock 모드 전환"
+                >
+                  {mode === 'live' ? 'Live' : 'Mock'}
+                </button>
+              )}
             </div>
             <p className="text-[11px] text-slate-500 dark:text-zinc-400 truncate mt-0.5">
               {showSettings ? '설정 및 훅 관리' : MASCOT_LABELS[mascotState]}
@@ -202,52 +207,54 @@ export function App() {
         </>
       )}
 
-      {/* Footer */}
-      <div className="pt-2 border-t border-black/8 dark:border-white/10 flex items-center justify-between gap-1">
-        {mode === 'live' ? (
-          <>
-            <span className="text-[10px] text-slate-400 dark:text-zinc-400">
-              로컬 세션 · 훅 캐시 감시 중
-            </span>
-            <button
-              type="button"
-              onClick={() => handleModeToggle('mock')}
-              className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-300 hover:underline cursor-pointer"
-            >
-              Mock 테스트 →
-            </button>
-          </>
-        ) : (
-          <>
-            <button
-              type="button"
-              onClick={() => handleModeToggle('live')}
-              className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 hover:underline shrink-0 cursor-pointer"
-            >
-              ← Live
-            </button>
-            <div className="flex items-center gap-1 flex-wrap justify-end">
-              {SCENARIOS.map((item) => {
-                const active = scenario === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => handleScenarioChange(item.id)}
-                    className={`px-1.5 py-0.5 rounded text-[10px] font-semibold transition-colors cursor-pointer ${
-                      active
-                        ? 'bg-indigo-500 text-white'
-                        : 'bg-black/5 dark:bg-white/10 text-slate-500 dark:text-zinc-300 hover:bg-black/10 dark:hover:bg-white/15'
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                );
-              })}
-            </div>
-          </>
-        )}
-      </div>
+      {/* Footer (dev-only Mock switcher) */}
+      {isDev && (
+        <div className="pt-2 border-t border-black/8 dark:border-white/10 flex items-center justify-between gap-1">
+          {mode === 'live' ? (
+            <>
+              <span className="text-[10px] text-slate-400 dark:text-zinc-400">
+                로컬 세션 · 훅 캐시 감시 중
+              </span>
+              <button
+                type="button"
+                onClick={() => handleModeToggle('mock')}
+                className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-300 hover:underline cursor-pointer"
+              >
+                Mock 테스트 →
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => handleModeToggle('live')}
+                className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 hover:underline shrink-0 cursor-pointer"
+              >
+                ← Live
+              </button>
+              <div className="flex items-center gap-1 flex-wrap justify-end">
+                {SCENARIOS.map((item) => {
+                  const active = scenario === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => handleScenarioChange(item.id)}
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-semibold transition-colors cursor-pointer ${
+                        active
+                          ? 'bg-indigo-500 text-white'
+                          : 'bg-black/5 dark:bg-white/10 text-slate-500 dark:text-zinc-300 hover:bg-black/10 dark:hover:bg-white/15'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
