@@ -112,6 +112,11 @@ impl CollectorManager {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
         let config = load_config(&home);
         let paths = CollectorPaths::from_config(&home, &config);
+        crate::hooks::repair_installed_hooks(
+            &paths.home,
+            &paths.antigravity.cli_dir.join("settings.json"),
+            &paths.claude.claude_dir.join("settings.json"),
+        );
         let initial_live = collect_all_live(&paths, &config, unix_now());
         animator.set_state(initial_live.overall_state);
 
