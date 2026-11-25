@@ -127,11 +127,18 @@ mod tests {
         assert!(snap.installed);
         assert_eq!(snap.hook_configured, Some(false));
         assert_eq!(snap.status, AgentStatus::Idle);
-        assert_eq!(snap.quotas.len(), 2);
+        assert_eq!(snap.quotas.len(), 3);
         assert_eq!(snap.quotas[0].label, "5h");
         assert!((snap.quotas[0].remaining_percent - 72.5).abs() < 0.01);
         assert_eq!(snap.quotas[1].label, "Week");
         assert!((snap.quotas[1].remaining_percent - 39.0).abs() < 0.01);
+
+        assert!(snap.quotas[0].group.is_none());
+        assert!(snap.quotas[1].group.is_none());
+        assert_eq!(snap.quotas[2].id, "seven_day_opus");
+        assert_eq!(snap.quotas[2].group.as_deref(), Some("Opus"));
+        assert_eq!(snap.quotas[2].label, "Week");
+        assert_eq!(snap.quotas[2].remaining_percent, 65.0);
 
         let _ = std::fs::remove_dir_all(&tmp_claude);
     }

@@ -1,4 +1,4 @@
-import type { ToolSnapshot } from '../types/usage';
+import type { QuotaWindow, ToolSnapshot } from '../types/usage';
 import { mapAgentStatusToMascot, STATUS_META, TOOL_META } from '../utils/format';
 import { PastelToki } from './PastelToki';
 import { QuotaBar } from './QuotaBar';
@@ -23,7 +23,14 @@ export function ToolCard({ snapshot, nowUnix }: ToolCardProps) {
         ? 'CLI 재시작·1회 응답 대기'
         : '데이터 없음';
 
-  const quotas = snapshot.quotas;
+  const groups = new Map<string, QuotaWindow[]>();
+  for (const quota of snapshot.quotas) {
+    const name = quota.group ?? '';
+    const group = groups.get(name);
+    if (group) group.push(quota);
+    else groups.set(name, [quota]);
+  }
+  const showGroupNames = groups.size > 1;
 
   return (
     <div className="rounded-xl bg-white/55 dark:bg-white/[0.06] border border-black/6 dark:border-white/[0.08] px-3 py-2.5 flex items-center gap-2.5">
@@ -54,7 +61,7 @@ export function ToolCard({ snapshot, nowUnix }: ToolCardProps) {
           </span>
         </div>
 
-        {quotas.length === 0 ? (
+        {groups.size === 0 ? (
           <QuotaBar
             label="Quota"
             window={null}
@@ -62,16 +69,27 @@ export function ToolCard({ snapshot, nowUnix }: ToolCardProps) {
             unconfiguredHint={unconfiguredHint}
           />
         ) : (
-          <div className="grid grid-cols-2 gap-x-2.5 gap-y-1.5">
-            {quotas.map((q, idx) => {
-              const spanFull =
-                quotas.length % 2 === 1 && idx === quotas.length - 1;
-              return (
-                <div key={q.id} className={spanFull ? 'col-span-2' : undefined}>
-                  <QuotaBar label={q.label} window={q} nowUnix={nowUnix} />
+          <div className={showGroupNames ? 'flex flex-col gap-2' : undefined}>
+            {Array.from(groups, ([name, quotas]) => (
+              <div key={name}>
+                {showGroupNames && (
+                  <div className="truncate text-[10px] font-semibold text-slate-400 dark:text-zinc-400 leading-none mb-1">
+                    {name || '기본'}
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-x-2.5 gap-y-1.5">
+                  {quotas.map((q, idx) => {
+                    const spanFull =
+                      !showGroupNames && quotas.length % 2 === 1 && idx === quotas.length - 1;
+                    return (
+                      <div key={q.id} className={spanFull ? 'col-span-2' : undefined}>
+                        <QuotaBar label={q.label} window={q} nowUnix={nowUnix} />
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
         )}
       </div>

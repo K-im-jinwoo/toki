@@ -111,17 +111,28 @@ fn dual_quotas(five_used: f64, week_used: f64, five_reset: i64, week_reset: i64)
 }
 
 fn agy_quotas(
-    five_used: f64,
-    week_used: f64,
-    argon_used: f64,
+    gemini: (f64, f64),
+    three_p: (f64, f64),
     five_reset: i64,
     week_reset: i64,
 ) -> Vec<QuotaWindow> {
-    vec![
-        QuotaWindow::from_used("five_hour", "5h", five_used, Some(five_reset), 300),
-        QuotaWindow::from_used("weekly", "Week", week_used, Some(week_reset), 10_080),
-        QuotaWindow::from_used("argon", "Argon", argon_used, Some(week_reset), 10_080),
-    ]
+    [("gemini", "Gemini", gemini), ("3p", "3P", three_p)]
+        .into_iter()
+        .flat_map(|(id, group, (five_used, week_used))| {
+            [
+                QuotaWindow::from_used(format!("{id}-5h"), "5h", five_used, Some(five_reset), 300)
+                    .with_group(Some(group.into())),
+                QuotaWindow::from_used(
+                    format!("{id}-weekly"),
+                    "Week",
+                    week_used,
+                    Some(week_reset),
+                    10_080,
+                )
+                .with_group(Some(group.into())),
+            ]
+        })
+        .collect()
 }
 
 fn generate_snapshot(scenario: MockScenario, tick: u64, now: i64) -> UsageSnapshot {
@@ -162,7 +173,7 @@ fn generate_snapshot(scenario: MockScenario, tick: u64, now: i64) -> UsageSnapsh
                 installed: true,
                 hook_configured: Some(true),
                 status: AgentStatus::Idle,
-                quotas: agy_quotas(12.0, 19.0, 6.0, five_reset, week_reset),
+                quotas: agy_quotas((12.0, 19.0), (9.0, 6.0), five_reset, week_reset),
                 active_sessions: vec![],
                 last_updated_at: Some(now - 1_200),
             },
@@ -197,7 +208,7 @@ fn generate_snapshot(scenario: MockScenario, tick: u64, now: i64) -> UsageSnapsh
                 installed: true,
                 hook_configured: Some(true),
                 status: AgentStatus::Idle,
-                quotas: agy_quotas(24.0, 31.0, 15.0, five_reset, week_reset),
+                quotas: agy_quotas((24.0, 31.0), (20.0, 15.0), five_reset, week_reset),
                 active_sessions: vec![SessionSummary {
                     id: "agy-idle".into(),
                     title: "Review tray animation".into(),
@@ -238,7 +249,7 @@ fn generate_snapshot(scenario: MockScenario, tick: u64, now: i64) -> UsageSnapsh
                 installed: true,
                 hook_configured: Some(true),
                 status: AgentStatus::Idle,
-                quotas: agy_quotas(18.0, 38.0, 12.0, five_reset, week_reset),
+                quotas: agy_quotas((18.0, 38.0), (15.0, 12.0), five_reset, week_reset),
                 active_sessions: vec![SessionSummary {
                     id: "agy-recent".into(),
                     title: "Design Toki UI cards".into(),
@@ -286,7 +297,7 @@ fn generate_snapshot(scenario: MockScenario, tick: u64, now: i64) -> UsageSnapsh
                 installed: true,
                 hook_configured: Some(true),
                 status: AgentStatus::Running,
-                quotas: agy_quotas(36.0 + drift, 41.0, 22.0, five_reset, week_reset),
+                quotas: agy_quotas((36.0 + drift, 41.0), (28.0, 22.0), five_reset, week_reset),
                 active_sessions: vec![SessionSummary {
                     id: "agy-sprint".into(),
                     title: "Build dashboard components".into(),
@@ -333,7 +344,7 @@ fn generate_snapshot(scenario: MockScenario, tick: u64, now: i64) -> UsageSnapsh
                 installed: true,
                 hook_configured: Some(true),
                 status: AgentStatus::Running,
-                quotas: agy_quotas(30.0, 40.0, 27.0, five_reset, week_reset),
+                quotas: agy_quotas((30.0, 40.0), (35.0, 27.0), five_reset, week_reset),
                 active_sessions: vec![SessionSummary {
                     id: "agy-bg".into(),
                     title: "Build UI shell".into(),
@@ -374,7 +385,7 @@ fn generate_snapshot(scenario: MockScenario, tick: u64, now: i64) -> UsageSnapsh
                 installed: true,
                 hook_configured: Some(true),
                 status: AgentStatus::QuotaLow,
-                quotas: agy_quotas(45.0, 52.0, 96.0, five_reset, week_reset),
+                quotas: agy_quotas((45.0, 52.0), (68.0, 96.0), five_reset, week_reset),
                 active_sessions: vec![],
                 last_updated_at: Some(now - 240),
             },

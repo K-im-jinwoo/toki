@@ -8,6 +8,10 @@
     "seven_day": {
       "used_percentage": 61.0,
       "resets_at": 2000500000
+    },
+    "seven_day_opus": {
+      "used_percentage": 35,
+      "resets_at": 2000500000
     }
   },
   "workspace": {

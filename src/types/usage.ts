@@ -31,6 +31,7 @@ export type AccentTheme = 'default' | ToolId;
 export interface QuotaWindow {
   id: string;
   label: string;
+  group?: string;
   remainingPercent: number;
   usedPercent: number;
   resetsAt: number | null;

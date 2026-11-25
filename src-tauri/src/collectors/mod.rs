@@ -468,95 +468,85 @@ pub fn detect_hook_configured(settings_path: &Path) -> bool {
 }
 
 /// Shared defensive parser for `~/.toki/hooks/<tool>.json`.
-/// Supports Claude (`rate_limits.five_hour / seven_day`) and
-/// Antigravity (`quota.gemini-5h / gemini-weekly / gemini-argon-wtu-weekly`).
 pub fn parse_hook_file(path: &Path, now_unix: i64) -> (Option<i64>, Vec<QuotaWindow>) {
-    let Ok(content) = fs::read_to_string(path) else {
+    let Some((updated_at, payload)) = read_hook_payload(path) else {
         return (None, vec![]);
     };
-    let Ok(val) = serde_json::from_str::<Value>(&content) else {
-        return (None, vec![]);
-    };
-
-    let updated_at = val
-        .get("updated_at")
-        .and_then(|v| v.as_i64())
-        .or_else(|| file_mtime_unix(path));
-
-    let payload = val.get("raw").unwrap_or(&val);
-    let mut windows = Vec::new();
-
-    if let Some(rl) = payload
-        .get("quota")
-        .or_else(|| payload.get("rate_limits"))
-        .or_else(|| payload.get("quotas"))
-    {
-        extract_bucket(
-            rl,
-            &["gemini-5h", "five_hour", "5h"],
-            "five_hour",
-            "5h",
-            300,
-            updated_at,
-            now_unix,
-            &mut windows,
-        );
-        extract_bucket(
-            rl,
-            &["gemini-weekly", "seven_day", "weekly"],
-            "weekly",
-            "Week",
-            10_080,
-            updated_at,
-            now_unix,
-            &mut windows,
-        );
-        extract_bucket(
-            rl,
-            &["gemini-argon-wtu-weekly", "argon", "argon_weekly"],
-            "argon",
-            "Argon",
-            10_080,
-            updated_at,
-            now_unix,
-            &mut windows,
-        );
-    }
-
-    (updated_at, windows)
+    (
+        updated_at,
+        parse_hook_quotas(&payload, updated_at, now_unix),
+    )
 }
 
-#[allow(clippy::too_many_arguments)]
-fn extract_bucket(
-    container: &Value,
-    keys: &[&str],
-    id: &str,
-    label: &str,
-    default_minutes: u32,
+fn read_hook_payload(path: &Path) -> Option<(Option<i64>, Value)> {
+    let file = fs::File::open(path).ok()?;
+    let mut value: Value = serde_json::from_reader(std::io::BufReader::new(&file)).ok()?;
+    let updated_at = value.get("updated_at").and_then(Value::as_i64).or_else(|| {
+        // The hook replaces the cache atomically. Use the timestamp of the file we read.
+        let modified = file.metadata().ok()?.modified().ok()?;
+        Some(modified.duration_since(UNIX_EPOCH).ok()?.as_secs() as i64)
+    });
+    let payload = match value.get_mut("raw") {
+        Some(raw) if raw.is_object() => raw.take(),
+        _ => value,
+    };
+    Some((updated_at, payload))
+}
+
+fn parse_hook_quotas(payload: &Value, updated_at: Option<i64>, now_unix: i64) -> Vec<QuotaWindow> {
+    let mut buckets = std::collections::HashMap::new();
+    for container in ["quota", "rate_limits", "quotas"]
+        .iter()
+        .filter_map(|key| payload.get(key).and_then(Value::as_object))
+    {
+        for (key, bucket) in container {
+            let id = key.trim().to_lowercase();
+            if id.is_empty() || buckets.contains_key(&id) {
+                continue;
+            }
+            if let Some(parsed) = parse_hook_bucket(id.clone(), bucket, updated_at, now_unix) {
+                buckets.insert(id, parsed);
+            }
+        }
+    }
+
+    let mut windows: Vec<_> = buckets.into_values().collect();
+    windows.sort_by_cached_key(|(group_order, window_order, quota)| {
+        (
+            *group_order,
+            quota.group.as_deref().unwrap_or_default().to_lowercase(),
+            *window_order,
+            quota.window_minutes,
+            quota.id.clone(),
+        )
+    });
+    windows.into_iter().map(|(_, _, quota)| quota).collect()
+}
+
+fn parse_hook_bucket(
+    id: String,
+    bucket: &Value,
     hook_updated_at: Option<i64>,
     now_unix: i64,
-    out: &mut Vec<QuotaWindow>,
-) {
-    let bucket = keys.iter().find_map(|k| container.get(*k));
-    let Some(obj) = bucket else { return };
-
+) -> Option<(u8, u8, QuotaWindow)> {
+    let obj = bucket.as_object()?;
     let used_opt = obj
         .get("remaining_fraction")
         .and_then(|v| v.as_f64())
         .map(|frac| (1.0 - frac.clamp(0.0, 1.0)) * 100.0)
         .or_else(|| {
             obj.get("used_percentage")
-                .or_else(|| obj.get("used_percent"))
-                .and_then(|v| v.as_f64())
+                .and_then(Value::as_f64)
+                .or_else(|| obj.get("used_percent").and_then(Value::as_f64))
         })
         .or_else(|| {
             obj.get("remaining_percentage")
-                .or_else(|| obj.get("remaining_percent"))
-                .and_then(|v| v.as_f64())
+                .and_then(Value::as_f64)
+                .or_else(|| obj.get("remaining_percent").and_then(Value::as_f64))
                 .map(|rem| 100.0 - rem)
         });
 
-    let Some(used) = used_opt else { return };
+    let used = used_opt?;
 
     let resets_at = obj
         .get("resets_at")
@@ -569,7 +559,7 @@ fn extract_bucket(
         .or_else(|| {
             obj.get("reset_in_seconds")
                 .and_then(|v| v.as_i64())
-                .map(|secs| hook_updated_at.unwrap_or(now_unix) + secs)
+                .and_then(|secs| hook_updated_at.unwrap_or(now_unix).checked_add(secs))
         });
 
     let effective_used = match resets_at {
@@ -577,11 +567,165 @@ fn extract_bucket(
         _ => used,
     };
 
-    out.push(QuotaWindow::from_used(
-        id,
-        label,
-        effective_used,
-        resets_at,
-        default_minutes,
-    ));
+    let (group, group_order, label, minutes, window_order) = normalize_bucket_key(&id);
+    let quota =
+        QuotaWindow::from_used(id, label, effective_used, resets_at, minutes).with_group(group);
+    Some((group_order, window_order, quota))
+}
+
+fn normalize_bucket_key(id: &str) -> (Option<String>, u8, String, u32, u8) {
+    let mut tokens = id
+        .split(['-', '_'])
+        .filter(|token| !token.is_empty())
+        .peekable();
+    let mut window = None;
+    let mut group_tokens = Vec::new();
+
+    while let Some(token) = tokens.next() {
+        let known = match (token, tokens.peek().copied()) {
+            ("five", Some("hour")) => Some(("5h", 300, 0, true)),
+            ("one", Some("day")) => Some(("Day", 1_440, 1, true)),
+            ("seven", Some("day")) => Some(("Week", 10_080, 2, true)),
+            ("5h" | "5hr", _) => Some(("5h", 300, 0, false)),
+            ("daily" | "1d" | "24h", _) => Some(("Day", 1_440, 1, false)),
+            ("weekly" | "7d" | "week", _) => Some(("Week", 10_080, 2, false)),
+            ("monthly" | "30d" | "month", _) => Some(("Month", 43_200, 3, false)),
+            _ => None,
+        };
+        let candidate = if let Some((label, minutes, order, paired)) = known {
+            if paired {
+                tokens.next();
+            }
+            Some((label, minutes, order))
+        } else {
+            parse_duration_token(token)
+        };
+
+        if let Some(candidate) = candidate {
+            window.get_or_insert(candidate);
+        } else if token != "wtu" {
+            group_tokens.push(token);
+        }
+    }
+
+    let (group, group_order) = match group_tokens.as_slice() {
+        [] => (None, 0),
+        ["gemini"] => (Some("Gemini".into()), 0),
+        ["3p"] => (Some("3P".into()), 1),
+        ["argon"] | ["gemini", "argon"] => (Some("Argon".into()), 2),
+        _ => {
+            let name = group_tokens
+                .into_iter()
+                .map(|token| match token {
+                    "3p" | "ai" | "api" | "gpt" => token.to_uppercase(),
+                    _ => {
+                        let mut chars = token.chars();
+                        let first = chars.next().expect("empty tokens are filtered out");
+                        format!("{}{}", first.to_uppercase(), chars.as_str())
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            (Some(name), 10)
+        }
+    };
+    let (label, minutes, window_order) = window.unwrap_or(("Quota", 0, 99));
+    (group, group_order, label.into(), minutes, window_order)
+}
+
+fn parse_duration_token(token: &str) -> Option<(&str, u32, u8)> {
+    let (count, multiplier, order) = if let Some(hours) = token.strip_suffix('h') {
+        (hours, 60, 1)
+    } else {
+        (token.strip_suffix('d')?, 1_440, 2)
+    };
+    if !count.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let count = count.parse::<u32>().ok()?;
+    let minutes = count
+        .checked_mul(multiplier)
+        .filter(|minutes| *minutes > 0)?;
+    Some((token, minutes, order))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn discovers_gemini_and_3p_buckets_without_argon() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/antigravity_hook_multi_pool.json");
+        let (updated_at, quotas) = parse_hook_file(&path, 1_800_000_010);
+
+        assert_eq!(updated_at, Some(1_800_000_000));
+        assert_eq!(
+            quotas
+                .iter()
+                .map(|q| (q.id.as_str(), q.label.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                ("gemini-5h", "5h"),
+                ("gemini-weekly", "Week"),
+                ("3p-5h", "5h"),
+                ("3p-weekly", "Week")
+            ]
+        );
+        assert_eq!(
+            quotas
+                .iter()
+                .map(|q| q.group.as_deref())
+                .collect::<Vec<_>>(),
+            [Some("Gemini"), Some("Gemini"), Some("3P"), Some("3P")]
+        );
+        assert_eq!(quotas[2].remaining_percent, 5.0);
+        assert_eq!(
+            derive_tool_status(true, &[], &quotas),
+            AgentStatus::QuotaLow
+        );
+        assert_eq!(quotas[1].resets_at, Some(1_800_600_000));
+
+        let (_, expired) = parse_hook_file(&path, 1_800_000_100);
+        assert_eq!(expired[2].remaining_percent, 100.0);
+    }
+
+    #[test]
+    fn discovers_future_buckets_across_quota_objects() {
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/future_hook_quotas.json");
+        let (_, quotas) = parse_hook_file(&path, 1_800_000_000);
+
+        assert_eq!(
+            quotas
+                .iter()
+                .map(|q| (q.id.as_str(), q.label.as_str(), q.window_minutes))
+                .collect::<Vec<_>>(),
+            [
+                ("ai", "Quota", 0),
+                ("api-12h", "12h", 720),
+                ("api-2d", "2d", 2880),
+                ("flash-daily", "Day", 1440),
+                ("gpt-month", "Month", 43200),
+                ("opus-5h", "5h", 300),
+                ("opus-weekly", "Week", 10080)
+            ]
+        );
+        assert_eq!(
+            quotas
+                .iter()
+                .map(|q| q.group.as_deref())
+                .collect::<Vec<_>>(),
+            [
+                Some("AI"),
+                Some("API"),
+                Some("API"),
+                Some("Flash"),
+                Some("GPT"),
+                Some("Opus"),
+                Some("Opus")
+            ]
+        );
+        assert_eq!(quotas[6].remaining_percent, 61.0);
+    }
 }

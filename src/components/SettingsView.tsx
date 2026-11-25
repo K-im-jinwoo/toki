@@ -153,7 +153,7 @@ export function SettingsView({ onSnapshotUpdated }: SettingsViewProps) {
       {/* statusLine Hook Setup */}
       <section className="rounded-xl bg-white/55 dark:bg-white/[0.06] border border-black/6 dark:border-white/[0.08] p-2.5 space-y-2">
         <div className="text-[11px] font-semibold text-slate-700 dark:text-zinc-200">
-          statusLine 훅 연동 (5h / Week / Argon)
+          statusLine 훅 연동 (쿼터 풀)
         </div>
 
         <div className="flex items-center justify-between gap-2 text-[11px]">

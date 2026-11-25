@@ -1,0 +1,30 @@
+{
+  "updated_at": 1800000000,
+  "raw": {
+    "agent_state": "working",
+    "conversation_id": "new-conv",
+    "cwd": "/Users/demo/Project/toki",
+    "quota": {
+      "gemini-5h": {
+        "remaining_fraction": 0.88,
+        "reset_time": "2033-05-18T03:33:20Z"
+      },
+      "gemini-weekly": {
+        "remaining_fraction": 0.72,
+        "reset_in_seconds": 600000
+      },
+      "3p-5h": {
+        "used_percent": 95,
+        "resets_at": 1800000100
+      },
+      "3p-weekly": {
+        "remaining_percentage": 77
+      },
+      "gemini-argon-wtu-weekly": null,
+      "metadata": {
+        "used_percentage": "n/a"
+      },
+      "plan_tier": "pro"
+    }
+  }
+}

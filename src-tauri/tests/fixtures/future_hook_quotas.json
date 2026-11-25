@@ -1,0 +1,30 @@
+{
+  "updated_at": 1800000000,
+  "quota": null,
+  "rate_limits": {
+    "opus-5h": {
+      "remaining_percent": 70
+    }
+  },
+  "quotas": {
+    "opus-weekly": {
+      "used_percentage": null,
+      "used_percent": 39
+    },
+    "flash-daily": {
+      "remaining_fraction": 0.8
+    },
+    "api-12h": {
+      "used_percentage": 20
+    },
+    "api-2d": {
+      "used_percentage": 21
+    },
+    "gpt-month": {
+      "used_percentage": 10
+    },
+    "ai": {
+      "used_percentage": 24
+    }
+  }
+}

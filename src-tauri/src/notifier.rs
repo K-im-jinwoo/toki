@@ -42,9 +42,14 @@ impl NotifierState {
                 if q.remaining_percent <= threshold {
                     if self.alerted_low_quotas.insert(key) {
                         let name = tool_display_name(tool_snap.tool);
+                        let label = &q.label;
+                        let title = match q.group.as_deref() {
+                            Some(group) => format!("{name} {group} {label} 잔여량 부족"),
+                            None => format!("{name} {label} 잔여량 부족"),
+                        };
                         send_notification(
                             app,
-                            &format!("{name} {} 잔여량 부족", q.label),
+                            &title,
                             &format!("남은 쿼터가 {:.0}%입니다.", q.remaining_percent),
                         );
                     }

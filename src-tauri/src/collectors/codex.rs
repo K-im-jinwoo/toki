@@ -121,7 +121,7 @@ fn parse_codex_rollout(path: &Path, fallback_mtime: i64, now_unix: i64) -> std::
     let mut last_ts: Option<i64> = None;
     let mut turn_active = false;
     let mut waiting_approval = false;
-    let mut latest_rate_limits: Option<(i64, Value)> = None;
+    let mut latest_rate_limits = None;
 
     for line_res in reader.lines() {
         let Ok(line) = line_res else { continue };
@@ -181,8 +181,11 @@ fn parse_codex_rollout(path: &Path, fallback_mtime: i64, now_unix: i64) -> std::
                         }
                         "token_count" => {
                             if let Some(rl) = p.get("rate_limits") {
-                                let ts = event_ts.unwrap_or(fallback_mtime);
-                                latest_rate_limits = Some((ts, rl.clone()));
+                                let quotas = parse_codex_rate_limits(rl, now_unix);
+                                if !quotas.is_empty() {
+                                    let ts = event_ts.unwrap_or(fallback_mtime);
+                                    latest_rate_limits = Some((ts, quotas));
+                                }
                             }
                         }
                         _ => {}
@@ -215,7 +218,7 @@ fn parse_codex_rollout(path: &Path, fallback_mtime: i64, now_unix: i64) -> std::
         .unwrap_or_else(|| format!("Codex · {}", &sid.chars().take(8).collect::<String>()));
 
     let (quota_timestamp, quotas) = match latest_rate_limits {
-        Some((ts, rl)) => (Some(ts), parse_codex_rate_limits(&rl, now_unix)),
+        Some((ts, quotas)) => (Some(ts), quotas),
         None => (None, vec![]),
     };
 
@@ -311,6 +314,20 @@ mod tests {
         assert_eq!(snap.quotas[1].label, "Week");
         assert!((snap.quotas[1].remaining_percent - 58.0).abs() < 0.01);
         assert_eq!(snap.active_sessions[0].workspace.as_deref(), Some("toki"));
+    }
+
+    #[test]
+    fn ignores_trailing_empty_premium_rate_limits() {
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex_rollout.jsonl");
+        let now = parse_timestamp_to_unix("2026-11-18T12:01:30Z").unwrap();
+        let parsed = parse_codex_rollout(&fixture, now, now).unwrap();
+
+        assert_eq!(parsed.quotas.len(), 2);
+        assert_eq!(
+            parsed.quota_timestamp,
+            parse_timestamp_to_unix("2026-11-18T12:00:12Z")
+        );
     }
 
     #[test]

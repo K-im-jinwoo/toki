@@ -46,12 +46,14 @@ impl MascotState {
     }
 }
 
-/// Remaining quota window (e.g. "5h", "Week", "Argon").
+/// Remaining quota window (e.g. "5h" or "Week") in an optional pool.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QuotaWindow {
     pub id: String,
     pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
     pub remaining_percent: f64,
     pub used_percent: f64,
     pub resets_at: Option<i64>,
@@ -71,11 +73,17 @@ impl QuotaWindow {
         Self {
             id: id.into(),
             label: label.into(),
+            group: None,
             remaining_percent: remaining,
             used_percent: clamped_used,
             resets_at,
             window_minutes,
         }
+    }
+
+    pub fn with_group(mut self, group: Option<String>) -> Self {
+        self.group = group;
+        self
     }
 }
 
