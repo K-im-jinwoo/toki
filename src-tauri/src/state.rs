@@ -1,7 +1,48 @@
-use crate::schema::{AgentStatus, MascotState, ToolSnapshot, UsageSnapshot};
+use std::collections::HashMap;
+
+use crate::schema::{AgentStatus, MascotState, QuotaWindow, ToolSnapshot, UsageSnapshot};
 
 pub const IDLE_TO_SLEEP_SECONDS: i64 = 600;
 pub const EXHAUSTED_THRESHOLD_PERCENT: f64 = 5.0;
+
+/// Returns true when a tool has no remaining usable quota pool above the exhausted threshold.
+/// - If ungrouped (global/default) windows exist (e.g. Codex or Claude base caps), any ungrouped
+///   window at or below `EXHAUSTED_THRESHOLD_PERCENT` exhausts the tool.
+/// - Otherwise, when all windows belong to named pools (e.g. Antigravity `Gemini` + `3P`), every
+///   pool must have at least one window at or below `EXHAUSTED_THRESHOLD_PERCENT`.
+pub fn is_tool_quota_exhausted(quotas: &[QuotaWindow]) -> bool {
+    if quotas.is_empty() {
+        return false;
+    }
+
+    let mut has_ungrouped = false;
+    let mut ungrouped_exhausted = false;
+    let mut named_pools: HashMap<&str, bool> = HashMap::new();
+
+    for q in quotas {
+        let low = q.remaining_percent <= EXHAUSTED_THRESHOLD_PERCENT;
+        match q.group.as_deref().map(str::trim).filter(|g| !g.is_empty()) {
+            None => {
+                has_ungrouped = true;
+                if low {
+                    ungrouped_exhausted = true;
+                }
+            }
+            Some(group) => {
+                let entry = named_pools.entry(group).or_insert(false);
+                if low {
+                    *entry = true;
+                }
+            }
+        }
+    }
+
+    if has_ungrouped {
+        ungrouped_exhausted
+    } else {
+        !named_pools.is_empty() && named_pools.values().all(|exhausted| *exhausted)
+    }
+}
 
 /// Evaluates the combined mascot state from all tool snapshots using strict priority:
 /// Alert > Sprint > Run > Exhausted > Idle > Sleep.
@@ -43,13 +84,12 @@ pub fn compute_mascot_state(tools: &[ToolSnapshot], now_unix: i64) -> MascotStat
         return MascotState::Run;
     }
 
-    let any_exhausted = tools.iter().any(|t| {
-        t.installed
-            && t.quotas
-                .iter()
-                .any(|w| w.remaining_percent <= EXHAUSTED_THRESHOLD_PERCENT)
-    });
-    if any_exhausted {
+    let installed_tools: Vec<&ToolSnapshot> = tools.iter().filter(|t| t.installed).collect();
+    let all_exhausted = !installed_tools.is_empty()
+        && installed_tools
+            .iter()
+            .all(|t| is_tool_quota_exhausted(&t.quotas));
+    if all_exhausted {
         return MascotState::Exhausted;
     }
 
@@ -172,20 +212,91 @@ mod tests {
     }
 
     #[test]
-    fn exhausted_at_five_percent_boundary_for_any_quota_bucket() {
-        let mut agy = base_tool(ToolId::Antigravity);
-        agy.quotas = vec![
-            QuotaWindow::from_used("five_hour", "5h", 10.0, None, 300),
+    fn exhausted_at_five_percent_boundary_for_single_pool_tool() {
+        let mut codex = base_tool(ToolId::Codex);
+        codex.quotas = vec![
+            QuotaWindow::from_used("five_hour", "5h", 95.0, None, 300), // 5.0% left
             QuotaWindow::from_used("weekly", "Week", 20.0, None, 10_080),
-            QuotaWindow::from_used("argon", "Argon", 95.0, None, 10_080), // 5.0% left
         ];
         assert_eq!(
-            compute_mascot_state(&[agy.clone()], 1_100),
+            compute_mascot_state(&[codex.clone()], 1_100),
             MascotState::Exhausted
         );
 
-        agy.quotas[2] = QuotaWindow::from_used("argon", "Argon", 94.9, None, 10_080);
-        assert_eq!(compute_mascot_state(&[agy], 1_100), MascotState::Idle);
+        codex.quotas[0] = QuotaWindow::from_used("five_hour", "5h", 94.9, None, 300);
+        assert_eq!(compute_mascot_state(&[codex], 1_100), MascotState::Idle);
+    }
+
+    #[test]
+    fn multi_pool_tool_is_exhausted_only_when_every_named_pool_is_low() {
+        let mut agy = base_tool(ToolId::Antigravity);
+        agy.quotas = vec![
+            QuotaWindow::from_used("gemini-5h", "5h", 20.0, None, 300)
+                .with_group(Some("Gemini".into())),
+            QuotaWindow::from_used("gemini-weekly", "Week", 30.0, None, 10_080)
+                .with_group(Some("Gemini".into())),
+            QuotaWindow::from_used("3p-5h", "5h", 100.0, None, 300).with_group(Some("3P".into())),
+            QuotaWindow::from_used("3p-weekly", "Week", 10.0, None, 10_080)
+                .with_group(Some("3P".into())),
+        ];
+        // Gemini still has plenty left, so tool & mascot remain Idle
+        assert!(!is_tool_quota_exhausted(&agy.quotas));
+        assert_eq!(compute_mascot_state(&[agy.clone()], 1_100), MascotState::Idle);
+
+        // Once Gemini also hits <= 5%, every named pool is exhausted
+        agy.quotas[0] = QuotaWindow::from_used("gemini-5h", "5h", 95.0, None, 300)
+            .with_group(Some("Gemini".into()));
+        assert!(is_tool_quota_exhausted(&agy.quotas));
+        assert_eq!(compute_mascot_state(&[agy], 1_100), MascotState::Exhausted);
+    }
+
+    #[test]
+    fn mascot_is_exhausted_only_when_all_installed_tools_are_exhausted() {
+        let mut codex = base_tool(ToolId::Codex);
+        codex.quotas = vec![
+            QuotaWindow::from_used("five_hour", "5h", 100.0, None, 300),
+            QuotaWindow::from_used("weekly", "Week", 40.0, None, 10_080),
+        ];
+
+        let mut agy = base_tool(ToolId::Antigravity);
+        agy.quotas = vec![
+            QuotaWindow::from_used("gemini-5h", "5h", 15.0, None, 300)
+                .with_group(Some("Gemini".into())),
+            QuotaWindow::from_used("3p-5h", "5h", 100.0, None, 300).with_group(Some("3P".into())),
+        ];
+
+        // Codex is out of 5h quota, but Antigravity Gemini is still usable
+        assert_eq!(
+            compute_mascot_state(&[codex.clone(), agy.clone()], 1_100),
+            MascotState::Idle
+        );
+
+        // Once Antigravity Gemini is also <= 5%, all installed tools are exhausted
+        agy.quotas[0] = QuotaWindow::from_used("gemini-5h", "5h", 97.0, None, 300)
+            .with_group(Some("Gemini".into()));
+        assert_eq!(
+            compute_mascot_state(&[codex, agy], 1_100),
+            MascotState::Exhausted
+        );
+    }
+
+    #[test]
+    fn claude_base_cap_exhausts_tool_while_optional_model_subcap_alone_does_not() {
+        let opus_only_low = vec![
+            QuotaWindow::from_used("five_hour", "5h", 20.0, None, 300),
+            QuotaWindow::from_used("seven_day", "Week", 30.0, None, 10_080),
+            QuotaWindow::from_used("seven_day_opus", "Week", 100.0, None, 10_080)
+                .with_group(Some("Opus".into())),
+        ];
+        assert!(!is_tool_quota_exhausted(&opus_only_low));
+
+        let base_cap_low = vec![
+            QuotaWindow::from_used("five_hour", "5h", 96.0, None, 300),
+            QuotaWindow::from_used("seven_day", "Week", 30.0, None, 10_080),
+            QuotaWindow::from_used("seven_day_opus", "Week", 20.0, None, 10_080)
+                .with_group(Some("Opus".into())),
+        ];
+        assert!(is_tool_quota_exhausted(&base_cap_low));
     }
 
     #[test]

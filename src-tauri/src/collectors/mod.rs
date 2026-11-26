@@ -18,7 +18,7 @@ use crate::config::{load_config, save_config, TokiConfig};
 use crate::mock::{MockCollector, MockScenario};
 use crate::notifier::NotifierState;
 use crate::schema::{AgentStatus, QuotaWindow, SessionSummary, UsageSnapshot};
-use crate::state::{build_usage_snapshot, EXHAUSTED_THRESHOLD_PERCENT};
+use crate::state::{build_usage_snapshot, is_tool_quota_exhausted};
 
 use self::antigravity::{collect_antigravity, AntigravityConfig};
 use self::claude::{collect_claude, ClaudeConfig};
@@ -379,10 +379,7 @@ pub fn derive_tool_status(
     if sessions.iter().any(|s| s.status == AgentStatus::Running) {
         return AgentStatus::Running;
     }
-    if quotas
-        .iter()
-        .any(|q| q.remaining_percent <= EXHAUSTED_THRESHOLD_PERCENT)
-    {
+    if is_tool_quota_exhausted(quotas) {
         return AgentStatus::QuotaLow;
     }
     AgentStatus::Idle
@@ -680,8 +677,12 @@ mod tests {
             [Some("Gemini"), Some("Gemini"), Some("3P"), Some("3P")]
         );
         assert_eq!(quotas[2].remaining_percent, 5.0);
+        // Only 3P is low while Gemini is healthy, so the tool remains Idle.
+        assert_eq!(derive_tool_status(true, &[], &quotas), AgentStatus::Idle);
+        let mut all_pools_low = quotas.clone();
+        all_pools_low[0].remaining_percent = 5.0;
         assert_eq!(
-            derive_tool_status(true, &[], &quotas),
+            derive_tool_status(true, &[], &all_pools_low),
             AgentStatus::QuotaLow
         );
         assert_eq!(quotas[1].resets_at, Some(1_800_600_000));

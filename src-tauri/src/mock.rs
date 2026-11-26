@@ -385,7 +385,7 @@ fn generate_snapshot(scenario: MockScenario, tick: u64, now: i64) -> UsageSnapsh
                 installed: true,
                 hook_configured: Some(true),
                 status: AgentStatus::QuotaLow,
-                quotas: agy_quotas((45.0, 52.0), (68.0, 96.0), five_reset, week_reset),
+                quotas: agy_quotas((96.0, 52.0), (68.0, 96.0), five_reset, week_reset),
                 active_sessions: vec![],
                 last_updated_at: Some(now - 240),
             },
